@@ -8,7 +8,6 @@ import xlsxwriter
 
 st.set_page_config(
     page_title="트립페이지 가격 비교 도구",
-    page_icon="🔎",
     layout="centered",
 )
 
@@ -25,8 +24,8 @@ CONFIG = {
     'DELAY_MAX':          2.0,
     'CHECKPOINT_EVERY':   100,
     'ABORT_CONSEC_FAILS': 30,
-    'AUTO_RETRY_WAIT':    300,   # 조기 종료 후 대기 시간(초)
-    'AUTO_RETRY_MAX':     10,    # 자동 재시도 최대 횟수
+    'AUTO_RETRY_WAIT':    300,
+    'AUTO_RETRY_MAX':     10,
 }
 
 today = date.today()
@@ -178,7 +177,7 @@ async def _run_all_async(pkg_cds, search_pairs, log_fn, prog_widget, total_count
             tmp.write_text(json.dumps(results, ensure_ascii=False), encoding='utf-8')
             tmp.rename(ckpt_path)
         except Exception as e:
-            log_fn(f"   ⚠ 체크포인트 저장 실패: {e}")
+            log_fn(f"   [오류] 체크포인트 저장 실패: {e}")
 
     async with aiohttp.ClientSession(connector=connector) as session:
         all_tasks = (
@@ -207,18 +206,18 @@ async def _run_all_async(pkg_cds, search_pairs, log_fn, prog_widget, total_count
 
             if save_ckpt and done % CONFIG['CHECKPOINT_EVERY'] == 0:
                 save_checkpoint()
-                log_fn(f"   💾 체크포인트 저장 ({done:,}/{total_count:,}건)")
+                log_fn(f"   [저장] 체크포인트 ({done:,}/{total_count:,}건)")
 
             if consec_fails >= CONFIG['ABORT_CONSEC_FAILS']:
-                log_fn(f"   🛑 연속 실패 {consec_fails}건 — 서버 차단 감지, 조기 종료")
-                log_fn(f"      완료: {done:,}건 / 미처리: {total_count - done:,}건")
+                log_fn(f"   [중단] 연속 실패 {consec_fails}건 — 서버 차단 감지, 조기 종료")
+                log_fn(f"          완료: {done:,}건 / 미처리: {total_count - done:,}건")
                 aborted = True
                 break
 
     if save_ckpt:
         save_checkpoint()
     if aborted:
-        log_fn(f"   💾 체크포인트 저장 완료 ({len(results):,}건 보존)")
+        log_fn(f"   [저장] 체크포인트 완료 ({len(results):,}건 보존)")
     return results, errors, aborted
 
 # ── Streamlit용 진행 바 래퍼 ──────────────────────────────────
@@ -253,24 +252,24 @@ class _ProgressWidget:
 
 # ── 메인 파이프라인 ───────────────────────────────────────────
 def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
-    log_fn("📂 엑셀 파일 읽는 중...")
+    log_fn("엑셀 파일 읽는 중...")
     try:
         df = pd.read_excel(io.BytesIO(excel_bytes), sheet_name=sheet_name, engine='openpyxl')
     except Exception as e:
-        log_fn(f"❌ 엑셀 로드 실패: {e}")
+        log_fn(f"[오류] 엑셀 로드 실패: {e}")
         raise
 
-    log_fn(f"✅ 로드 완료: {len(df):,}행 × {len(df.columns)}열")
+    log_fn(f"로드 완료: {len(df):,}행 x {len(df.columns)}열")
 
     for col in [CONFIG['COL_NORMAL_PRICE'], CONFIG['COL_PRICE_PC'], CONFIG['COL_LINK']]:
         if col not in df.columns:
-            log_fn(f"❌ 필수 컬럼 없음: '{col}' — 시트 이름 또는 컬럼명 확인 필요")
+            log_fn(f"[오류] 필수 컬럼 없음: '{col}' — 시트 이름 또는 컬럼명 확인 필요")
             raise KeyError(col)
 
     df['원본_normal_price'] = df[CONFIG['COL_NORMAL_PRICE']].copy()
     df['원본_price_pc']     = df[CONFIG['COL_PRICE_PC']].copy()
 
-    log_fn("🔍 링크 분류 중...")
+    log_fn("링크 분류 중...")
     df['_link_type']      = df[CONFIG['COL_LINK']].apply(classify_link)
     df['_pkg_cd']         = df[CONFIG['COL_LINK']].apply(extract_pkg_cd)
     df['_dep_date']       = df['_pkg_cd'].apply(extract_dep_date)
@@ -303,7 +302,7 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
     if ckpt_path.exists():
         try:
             existing = json.loads(ckpt_path.read_text(encoding='utf-8'))
-            log_fn(f"♻ 체크포인트 발견: {len(existing):,}건 이어서 진행")
+            log_fn(f"체크포인트 발견: {len(existing):,}건 이어서 진행")
         except Exception:
             pass
 
@@ -315,12 +314,12 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
             pkg_cds      = list(dict.fromkeys(pkg_cds + extra_pkg))
             search_pairs = list(dict.fromkeys(search_pairs + extra_search))
             retry_fail_path.unlink()
-            log_fn(f"♻ 이전 실패 재시도: pkg {len(extra_pkg)}건 / search {len(extra_search)}건 추가")
+            log_fn(f"이전 실패 재시도: pkg {len(extra_pkg)}건 / search {len(extra_search)}건 추가")
         except Exception:
             pass
 
     total = len(pkg_cds) + len(search_pairs)
-    log_fn(f"🔗 총 API 호출 예정: {total:,}건")
+    log_fn(f"총 API 호출 예정: {total:,}건")
     prog_widget.max   = max(total, 1)
     prog_widget.value = len(existing)
 
@@ -334,7 +333,7 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
 
     while aborted:
         label = f"자동 재시도 {auto_retry_cnt}회차" if auto_retry_cnt > 0 else "1차"
-        log_fn(f"🌐 API 호출 [{label}] 시작 (동시 {CONFIG['CONCURRENCY']}건)...")
+        log_fn(f"API 호출 [{label}] 시작 (동시 {CONFIG['CONCURRENCY']}건)...")
         start = time.time()
         try:
             price_map, error_map, aborted = loop.run_until_complete(
@@ -342,26 +341,26 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
                                existing=existing, ckpt_path=ckpt_path)
             )
         except Exception as e:
-            log_fn(f"❌ 예외 발생: {type(e).__name__}: {e}")
+            log_fn(f"[오류] {type(e).__name__}: {e}")
             raise
         elapsed = time.time() - start
-        log_fn(f"✅ [{label}] 완료 ({elapsed:.1f}초) | 성공: {len(price_map):,} / 실패: {len(error_map):,}")
+        log_fn(f"[{label}] 완료 ({elapsed:.1f}초) | 성공: {len(price_map):,} / 실패: {len(error_map):,}")
 
         if aborted:
             auto_retry_cnt += 1
             if auto_retry_cnt > CONFIG['AUTO_RETRY_MAX']:
-                log_fn(f"🛑 자동 재시도 {CONFIG['AUTO_RETRY_MAX']}회 소진 — 재실행이 필요합니다.")
+                log_fn(f"[중단] 자동 재시도 {CONFIG['AUTO_RETRY_MAX']}회 소진 — 재실행이 필요합니다.")
                 retry_abort = {k: v for k, v in error_map.items() if not _is_definite(str(v))}
                 if retry_abort:
                     retry_fail_path.write_text(
                         json.dumps(retry_abort, ensure_ascii=False), encoding='utf-8'
                     )
-                    log_fn(f"   💾 실패 목록 저장: {len(retry_abort)}건")
+                    log_fn(f"   [저장] 실패 목록 {len(retry_abort)}건")
                 loop.close()
                 return None, None
 
             wait_secs = CONFIG['AUTO_RETRY_WAIT']
-            log_fn(f"⏳ 서버 차단 감지 — {wait_secs // 60}분 후 자동 재시작 "
+            log_fn(f"서버 차단 감지 — {wait_secs // 60}분 후 자동 재시작 "
                    f"({auto_retry_cnt}/{CONFIG['AUTO_RETRY_MAX']}회차)")
             remaining = wait_secs
             while remaining > 0:
@@ -369,22 +368,22 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
                 time.sleep(step)
                 remaining -= step
                 if remaining > 0:
-                    log_fn(f"   🕐 재시작까지 {remaining}초 남음...")
+                    log_fn(f"   재시작까지 {remaining}초 남음...")
             existing = price_map
             prog_widget.max   = max(total, 1)
             prog_widget.value = len(existing)
-            log_fn(f"   ▶ 재시작 — 완료 {len(existing):,}건 / 잔여 {total - len(existing):,}건")
+            log_fn(f"   재시작 — 완료 {len(existing):,}건 / 잔여 {total - len(existing):,}건")
 
     # ── 완료 후 단기 재시도 (400 제외) ───────────────────────
     err_400   = {k: v for k, v in error_map.items() if 'HTTP 400' in str(v)}
     err_other = {k: v for k, v in error_map.items() if 'HTTP 400' not in str(v)}
 
     if err_400:
-        log_fn(f"   🚫 상품없음 확정(400): {len(err_400)}건 — 재시도 생략")
+        log_fn(f"   상품없음 확정(400): {len(err_400)}건 — 재시도 생략")
 
     still_fail = {}
     if err_other:
-        log_fn(f"🔄 일시차단 실패 {len(err_other)}건 재시도 중...")
+        log_fn(f"일시차단 실패 {len(err_other)}건 재시도 중...")
         time.sleep(2)
         r_pkg  = [k for k in err_other if not k.startswith('SEARCH:')]
         r_srch = [k.split(':', 1)[1] for k in err_other if k.startswith('SEARCH:')]
@@ -409,24 +408,24 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
         retry_fail_path.write_text(
             json.dumps(retry_later, ensure_ascii=False), encoding='utf-8'
         )
-        log_fn(f"   💾 다음 실행 재시도 목록: {len(retry_later)}건")
+        log_fn(f"   [저장] 다음 실행 재시도 목록: {len(retry_later)}건")
 
     # ── 상태 판정 ─────────────────────────────────────────────
-    log_fn("📊 상태 판정 중...")
+    log_fn("상태 판정 중...")
 
     def get_status(row):
         key, orig = row['_price_key'], row['원본_normal_price']
         parts = []
         if row['_link_type'] == 'pkg':
             dep = row['_dep_date']
-            if dep is None:   parts.append('⚠ 날짜파싱불가(링크확인필요)')
-            elif dep < today: parts.append(f'🔴 출발일지남 {dep}')
+            if dep is None:   parts.append('[확인필요] 날짜파싱불가')
+            elif dep < today: parts.append(f'[출발일지남] {dep}')
         if key in price_map:
             api = int(price_map[key])
-            if api != int(orig): parts.append(f'✅ 가격수정 {int(orig):,}→{api:,}원')
-        elif key is None:                parts.append('⚠ 링크오류')
-        elif key in confirmed_missing:   parts.append('🚫 상품없음(삭제검토필요)')
-        else:                            parts.append('⚠ 미확인(다음실행시재시도)')
+            if api != int(orig): parts.append(f'[가격수정] {int(orig):,} → {api:,}원')
+        elif key is None:                parts.append('[링크오류]')
+        elif key in confirmed_missing:   parts.append('[상품없음] 삭제검토필요')
+        else:                            parts.append('[미확인] 다음실행시재시도')
         return ' / '.join(parts) if parts else '정상'
 
     def get_new_price(row):
@@ -446,7 +445,7 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
         '정상':           int(df['상태'].str.fullmatch('정상').sum()),
     }
     loop.close()
-    log_fn(f"✅ 처리 완료!")
+    log_fn("처리 완료!")
     return df, stats
 
 
@@ -460,7 +459,6 @@ def save_excel(df):
         cols.insert(li + 1, cols.pop(cols.index('상태')))
     result_df = result_df[cols]
 
-    # 임시 파일에 쓴 뒤 bytes로 읽기 (constant_memory + BytesIO 호환 문제 회피)
     with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
         tmp_path = tmp.name
 
@@ -544,19 +542,19 @@ def save_excel(df):
 # ══════════════════════════════════════════════════════════════
 # Streamlit UI
 # ══════════════════════════════════════════════════════════════
-st.title("🔎 트립페이지 가격 비교 도구")
+st.title("트립페이지 가격 비교 도구")
 st.caption("EP 파일을 업로드하면 현재 API 가격과 비교하여 결과 파일을 생성합니다.")
 st.divider()
 
 uploaded = st.file_uploader(
     "EP 엑셀 파일 업로드 (.xlsx / .xlsm)",
     type=["xlsx", "xlsm"],
-    help="97,000~100,000행 기준으로 약 2~3시간 소요됩니다.",
+    help="97,000-100,000행 기준 약 2-3시간 소요됩니다.",
 )
 sheet = st.text_input("시트 이름", value="enbt_naver_ep")
 
 run_btn = st.button(
-    "▶ 가격 비교 실행",
+    "가격 비교 실행",
     type="primary",
     disabled=(uploaded is None),
     use_container_width=True,
@@ -566,7 +564,6 @@ if run_btn and uploaded:
     ckpt_dir    = Path(tempfile.mkdtemp())
     excel_bytes = uploaded.getvalue()
 
-    # 로그 영역
     log_lines       = []
     log_placeholder = st.empty()
 
@@ -575,11 +572,9 @@ if run_btn and uploaded:
         log_lines.append(f"[{ts}] {msg}")
         log_placeholder.code('\n'.join(log_lines[-30:]), language=None)
 
-    # 진행 바
     bar  = st.progress(0.0, text="준비 중...")
     prog = _ProgressWidget(bar)
 
-    # 실행
     try:
         df, stats = run_pipeline(excel_bytes, sheet, log_fn, prog, ckpt_dir)
     except Exception as e:
@@ -588,15 +583,14 @@ if run_btn and uploaded:
 
     if df is None:
         st.warning(
-            "⚠ 자동 재시도 횟수를 모두 소진했습니다. "
+            "자동 재시도 횟수를 모두 소진했습니다. "
             "페이지를 새로고침 후 다시 실행하면 이어서 진행됩니다."
         )
     else:
         bar.progress(1.0, text="완료!")
-        st.success("✅ 가격 비교 완료!")
+        st.success("가격 비교 완료!")
         st.divider()
 
-        # 통계
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("전체",          f"{stats['전체']:,}건")
         c2.metric("가격 수정",     f"{stats['가격 수정']:,}건")
@@ -606,13 +600,12 @@ if run_btn and uploaded:
 
         st.divider()
 
-        # 다운로드
-        log_fn("💾 엑셀 파일 생성 중...")
+        log_fn("엑셀 파일 생성 중...")
         fname, result_bytes = save_excel(df)
-        log_fn(f"✅ 파일 생성 완료: {fname}")
+        log_fn(f"파일 생성 완료: {fname}")
 
         st.download_button(
-            label="📥 결과 파일 다운로드",
+            label="결과 파일 다운로드",
             data=result_bytes,
             file_name=fname,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
