@@ -43,7 +43,7 @@ def extract_pkg_cd(url):
     return m.group(1) if m else None
 
 def extract_dep_date(pkg_cd):
-    if not pkg_cd: return None
+    if not isinstance(pkg_cd, str): return None
     body = pkg_cd[6:]
     m = re.match(r'^(\d{6,8})', body)
     if not m: return None
