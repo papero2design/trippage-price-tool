@@ -273,9 +273,8 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
     df['_link_type']      = df[CONFIG['COL_LINK']].apply(classify_link)
     df['_pkg_cd']         = df[CONFIG['COL_LINK']].apply(extract_pkg_cd)
     df['_dep_date']       = df['_pkg_cd'].apply(extract_dep_date)
-    _sp                   = df[CONFIG['COL_LINK']].apply(extract_search_params)
-    df['_search_keyword'] = _sp.apply(lambda x: x[0])
-    df['_search_idx']     = _sp.apply(lambda x: x[1])
+    df['_search_keyword'] = df[CONFIG['COL_LINK']].apply(lambda u: extract_search_params(u)[0])
+    df['_search_idx']     = df[CONFIG['COL_LINK']].apply(lambda u: extract_search_params(u)[1])
     df['_price_key']      = df.apply(make_price_key, axis=1)
 
     pkg_cds      = df[df['_link_type'] == 'pkg']['_pkg_cd'].dropna().unique().tolist()
