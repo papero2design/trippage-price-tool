@@ -5,9 +5,6 @@ from datetime import date, datetime
 from pathlib import Path
 import aiohttp
 import xlsxwriter
-import nest_asyncio
-
-nest_asyncio.apply()
 
 st.set_page_config(
     page_title="트립페이지 가격 비교 도구",
@@ -328,7 +325,8 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
     prog_widget.value = len(existing)
 
     # ── API 호출 (자동 재시도 루프) ──────────────────────────
-    loop           = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     auto_retry_cnt = 0
     aborted        = True
     price_map      = {}
@@ -359,6 +357,7 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
                         json.dumps(retry_abort, ensure_ascii=False), encoding='utf-8'
                     )
                     log_fn(f"   💾 실패 목록 저장: {len(retry_abort)}건")
+                loop.close()
                 return None, None
 
             wait_secs = CONFIG['AUTO_RETRY_WAIT']
@@ -446,6 +445,7 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
         '출발일 지남':    int(df['상태'].str.contains('출발일지남').sum()),
         '정상':           int(df['상태'].str.fullmatch('정상').sum()),
     }
+    loop.close()
     log_fn(f"✅ 처리 완료!")
     return df, stats
 
