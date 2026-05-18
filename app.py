@@ -541,10 +541,47 @@ def save_excel(df):
 # ══════════════════════════════════════════════════════════════
 # Streamlit UI
 # ══════════════════════════════════════════════════════════════
+
+for _k, _v in [('result_bytes', None), ('fname', None), ('stats', None), ('ckpt_dir', None)]:
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
+
 st.title("트립페이지 가격 비교 도구")
 st.caption("EP 파일을 업로드하면 현재 API 가격과 비교하여 결과 파일을 생성합니다.")
 st.divider()
 
+# ── 결과가 이미 있으면 바로 표시 ─────────────────────────────
+if st.session_state.result_bytes is not None:
+    stats = st.session_state.stats
+    st.success("가격 비교 완료!")
+    st.divider()
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("전체",          f"{stats['전체']:,}건")
+    c2.metric("가격 수정",     f"{stats['가격 수정']:,}건")
+    c3.metric("상품없음(삭제)", f"{stats['상품없음(삭제)']:,}건")
+    c4.metric("미확인",        f"{stats['미확인(재시도)']:,}건")
+    c5.metric("정상",          f"{stats['정상']:,}건")
+
+    st.divider()
+
+    st.download_button(
+        label="결과 파일 다운로드",
+        data=st.session_state.result_bytes,
+        file_name=st.session_state.fname,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
+        use_container_width=True,
+    )
+
+    st.divider()
+    if st.button("새 파일 처리하기", use_container_width=True):
+        for _k in ('result_bytes', 'fname', 'stats', 'ckpt_dir'):
+            st.session_state[_k] = None
+        st.rerun()
+    st.stop()
+
+# ── 처리 전 화면 ─────────────────────────────────────────────
 uploaded = st.file_uploader(
     "EP 엑셀 파일 업로드 (.xlsx / .xlsm)",
     type=["xlsx", "xlsm"],
@@ -560,7 +597,9 @@ run_btn = st.button(
 )
 
 if run_btn and uploaded:
-    ckpt_dir    = Path(tempfile.mkdtemp())
+    if st.session_state.ckpt_dir is None:
+        st.session_state.ckpt_dir = str(Path(tempfile.mkdtemp()))
+    ckpt_dir    = Path(st.session_state.ckpt_dir)
     excel_bytes = uploaded.getvalue()
 
     log_lines       = []
@@ -587,27 +626,11 @@ if run_btn and uploaded:
         )
     else:
         bar.progress(1.0, text="완료!")
-        st.success("가격 비교 완료!")
-        st.divider()
-
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("전체",          f"{stats['전체']:,}건")
-        c2.metric("가격 수정",     f"{stats['가격 수정']:,}건")
-        c3.metric("상품없음(삭제)", f"{stats['상품없음(삭제)']:,}건")
-        c4.metric("미확인",        f"{stats['미확인(재시도)']:,}건")
-        c5.metric("정상",          f"{stats['정상']:,}건")
-
-        st.divider()
-
         log_fn("엑셀 파일 생성 중...")
         fname, result_bytes = save_excel(df)
         log_fn(f"파일 생성 완료: {fname}")
 
-        st.download_button(
-            label="결과 파일 다운로드",
-            data=result_bytes,
-            file_name=fname,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary",
-            use_container_width=True,
-        )
+        st.session_state.result_bytes = result_bytes
+        st.session_state.fname        = fname
+        st.session_state.stats        = stats
+        st.rerun()
