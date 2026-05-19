@@ -168,7 +168,7 @@ async def _run_all_async(pkg_cds, search_pairs, log_fn, prog_widget, total_count
     search_todo  = [k for k in search_pairs if f"SEARCH:{k}" not in results]
     skipped      = (len(pkg_cds) - len(pkg_cds_todo)) + (len(search_pairs) - len(search_todo))
     if skipped:
-        log_fn(f"   스킵: {skipped:,}건 (이미 완료) / 신규: {len(pkg_cds_todo)+len(search_todo):,}건")
+        log_fn(f"이전 완료: {skipped:,}건 / 이번 조회: {len(pkg_cds_todo)+len(search_todo):,}건")
 
     def save_checkpoint():
         if not ckpt_path: return
@@ -177,7 +177,7 @@ async def _run_all_async(pkg_cds, search_pairs, log_fn, prog_widget, total_count
             tmp.write_text(json.dumps(results, ensure_ascii=False), encoding='utf-8')
             tmp.replace(ckpt_path)
         except Exception as e:
-            log_fn(f"   [오류] 체크포인트 저장 실패: {e}")
+            log_fn(f"진행 저장 실패: {e}")
 
     async with aiohttp.ClientSession(connector=connector) as session:
         all_tasks = (
@@ -206,18 +206,18 @@ async def _run_all_async(pkg_cds, search_pairs, log_fn, prog_widget, total_count
 
             if save_ckpt and done % CONFIG['CHECKPOINT_EVERY'] == 0:
                 save_checkpoint()
-                log_fn(f"   [저장] 체크포인트 ({done:,}/{total_count:,}건)")
+                log_fn(f"진행 저장 ({done:,} / {total_count:,}건)")
 
             if consec_fails >= CONFIG['ABORT_CONSEC_FAILS']:
-                log_fn(f"   [중단] 연속 실패 {consec_fails}건 — 서버 차단 감지, 조기 종료")
-                log_fn(f"          완료: {done:,}건 / 미처리: {total_count - done:,}건")
+                log_fn(f"서버 차단 감지 (연속 실패 {consec_fails}건) — 대기 후 자동 재시작")
+                log_fn(f"지금까지 완료: {done:,}건 / 남은 항목: {total_count - done:,}건")
                 aborted = True
                 break
 
     if save_ckpt:
         save_checkpoint()
     if aborted:
-        log_fn(f"   [저장] 체크포인트 완료 ({len(results):,}건 보존)")
+        log_fn(f"진행 상황 저장 완료 ({len(results):,}건)")
     return results, errors, aborted
 
 # ── Streamlit용 진행 바 래퍼 ──────────────────────────────────
@@ -235,7 +235,7 @@ class _ProgressWidget:
     @max.setter
     def max(self, v):
         self._max = max(v, 1)
-        self._bar.progress(0.0, text="진행 중...")
+        self._bar.progress(0.0, text="가격 조회 중...")
 
     @property
     def value(self):
@@ -248,28 +248,28 @@ class _ProgressWidget:
         if self._max > 0 and (now - self._last > 0.5 or v >= self._max):
             self._last = now
             pct = min(v / self._max, 1.0)
-            self._bar.progress(pct, text=f"{v:,} / {self._max:,} 건 완료")
+            self._bar.progress(pct, text=f"{v:,} / {self._max:,}건 조회 완료")
 
 # ── 메인 파이프라인 ───────────────────────────────────────────
 def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
-    log_fn("엑셀 파일 읽는 중...")
+    log_fn("엑셀 파일 읽는 중... (파일 크기에 따라 수십 초 소요)")
     try:
         df = pd.read_excel(io.BytesIO(excel_bytes), sheet_name=sheet_name, engine='openpyxl')
     except Exception as e:
-        log_fn(f"[오류] 엑셀 로드 실패: {e}")
+        log_fn(f"파일 로드 오류: {e}")
         raise
 
-    log_fn(f"로드 완료: {len(df):,}행 x {len(df.columns)}열")
+    log_fn(f"파일 로드 완료 — {len(df):,}행 x {len(df.columns)}열")
 
     for col in [CONFIG['COL_NORMAL_PRICE'], CONFIG['COL_PRICE_PC'], CONFIG['COL_LINK']]:
         if col not in df.columns:
-            log_fn(f"[오류] 필수 컬럼 없음: '{col}' — 시트 이름 또는 컬럼명 확인 필요")
+            log_fn(f"오류: '{col}' 컬럼을 찾을 수 없습니다. 시트 이름이나 컬럼명을 확인해주세요.")
             raise KeyError(col)
 
     df['원본_normal_price'] = df[CONFIG['COL_NORMAL_PRICE']].copy()
     df['원본_price_pc']     = df[CONFIG['COL_PRICE_PC']].copy()
 
-    log_fn("링크 분류 중...")
+    log_fn("상품 링크 분석 중...")
     df['_link_type']      = df[CONFIG['COL_LINK']].apply(classify_link)
     df['_pkg_cd']         = df[CONFIG['COL_LINK']].apply(extract_pkg_cd)
     df['_dep_date']       = df['_pkg_cd'].apply(extract_dep_date)
@@ -281,7 +281,7 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
     search_pairs = df[df['_link_type'] == 'search']['_search_keyword'].dropna().unique().tolist()
     unknown_cnt  = df['_link_type'].isna().sum()
 
-    log_fn(f"   pkg: {len(pkg_cds):,}건 / search: {len(search_pairs):,}건" +
+    log_fn(f"직접링크: {len(pkg_cds):,}건 / 검색링크: {len(search_pairs):,}건" +
            (f" / 분류불가: {unknown_cnt:,}건" if unknown_cnt else ""))
 
     def _is_definite(err_str):
@@ -301,7 +301,7 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
     if ckpt_path.exists():
         try:
             existing = json.loads(ckpt_path.read_text(encoding='utf-8'))
-            log_fn(f"체크포인트 발견: {len(existing):,}건 이어서 진행")
+            log_fn(f"이전 진행 기록 발견 — {len(existing):,}건 이어서 조회합니다")
         except Exception:
             pass
 
@@ -313,12 +313,12 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
             pkg_cds      = list(dict.fromkeys(pkg_cds + extra_pkg))
             search_pairs = list(dict.fromkeys(search_pairs + extra_search))
             retry_fail_path.unlink()
-            log_fn(f"이전 실패 재시도: pkg {len(extra_pkg)}건 / search {len(extra_search)}건 추가")
+            log_fn(f"이전 실패 항목 {len(extra_pkg)+len(extra_search):,}건을 재시도 목록에 추가")
         except Exception:
             pass
 
     total = len(pkg_cds) + len(search_pairs)
-    log_fn(f"총 API 호출 예정: {total:,}건")
+    log_fn(f"총 {total:,}건 가격 조회 시작")
     prog_widget.max   = max(total, 1)
     prog_widget.value = len(existing)
 
@@ -332,8 +332,10 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
 
     max_retries_hit = False
     while aborted:
-        label = f"자동 재시도 {auto_retry_cnt}회차" if auto_retry_cnt > 0 else "1차"
-        log_fn(f"API 호출 [{label}] 시작 (동시 {CONFIG['CONCURRENCY']}건)...")
+        if auto_retry_cnt == 0:
+            log_fn("API 가격 조회 중... (잠시 기다려주세요)")
+        else:
+            log_fn(f"재시도 {auto_retry_cnt}회차 시작...")
         start = time.time()
         try:
             price_map, error_map, aborted = loop.run_until_complete(
@@ -341,50 +343,49 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
                                existing=existing, ckpt_path=ckpt_path)
             )
         except Exception as e:
-            log_fn(f"[오류] {type(e).__name__}: {e}")
+            log_fn(f"오류 발생: {type(e).__name__}: {e}")
             raise
         elapsed = time.time() - start
-        log_fn(f"[{label}] 완료 ({elapsed:.1f}초) | 성공: {len(price_map):,} / 실패: {len(error_map):,}")
+        log_fn(f"조회 완료 ({elapsed:.0f}초) — 성공: {len(price_map):,}건 / 실패: {len(error_map):,}건")
 
         if aborted:
             auto_retry_cnt += 1
             if auto_retry_cnt > CONFIG['AUTO_RETRY_MAX']:
-                log_fn(f"[중단] 자동 재시도 {CONFIG['AUTO_RETRY_MAX']}회 소진.")
+                log_fn(f"최대 재시도 횟수({CONFIG['AUTO_RETRY_MAX']}회) 초과 — 수집된 {len(price_map):,}건으로 결과 생성")
                 retry_abort = {k: v for k, v in error_map.items() if not _is_definite(str(v))}
                 if retry_abort:
                     retry_fail_path.write_text(
                         json.dumps(retry_abort, ensure_ascii=False), encoding='utf-8'
                     )
-                    log_fn(f"   [저장] 실패 목록 {len(retry_abort)}건")
-                log_fn(f"현재까지 수집된 {len(price_map):,}건으로 부분 결과를 생성합니다.")
+                    log_fn(f"다음 실행 시 재시도: {len(retry_abort):,}건 저장")
                 max_retries_hit = True
-                break  # 부분 결과로 계속 진행
+                break
 
             wait_secs = CONFIG['AUTO_RETRY_WAIT']
-            log_fn(f"서버 차단 감지 — {wait_secs // 60}분 후 자동 재시작 "
-                   f"({auto_retry_cnt}/{CONFIG['AUTO_RETRY_MAX']}회차)")
+            log_fn(f"서버 차단 감지 — {wait_secs // 60}분 대기 후 자동 재시작 "
+                   f"(재시도 {auto_retry_cnt}/{CONFIG['AUTO_RETRY_MAX']}회)")
             remaining = wait_secs
             while remaining > 0:
                 step = min(30, remaining)
                 time.sleep(step)
                 remaining -= step
                 if remaining > 0:
-                    log_fn(f"   재시작까지 {remaining}초 남음...")
+                    log_fn(f"재시작까지 {remaining}초...")
             existing = price_map
             prog_widget.max   = max(total, 1)
             prog_widget.value = len(existing)
-            log_fn(f"   재시작 — 완료 {len(existing):,}건 / 잔여 {total - len(existing):,}건")
+            log_fn(f"재시작 — 완료 {len(existing):,}건, 남은 항목 {total - len(existing):,}건")
 
     # ── 완료 후 단기 재시도 (400 제외, 서버 차단 소진 시 생략) ──
     err_400   = {k: v for k, v in error_map.items() if 'HTTP 400' in str(v)}
     err_other = {} if max_retries_hit else {k: v for k, v in error_map.items() if 'HTTP 400' not in str(v)}
 
     if err_400:
-        log_fn(f"   상품없음 확정(400): {len(err_400)}건 — 재시도 생략")
+        log_fn(f"삭제된 상품 {len(err_400):,}건 확인됨")
 
     still_fail = {}
     if err_other:
-        log_fn(f"일시차단 실패 {len(err_other)}건 재시도 중...")
+        log_fn(f"일시 차단으로 실패한 {len(err_other):,}건 재시도 중...")
         time.sleep(2)
         r_pkg  = [k for k in err_other if not k.startswith('SEARCH:')]
         r_srch = [k.split(':', 1)[1] for k in err_other if k.startswith('SEARCH:')]
@@ -397,7 +398,7 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
         )
         new_ok = {k: v for k, v in retry_map.items() if k not in before}
         price_map.update(new_ok)
-        log_fn(f"   재시도 성공: {len(new_ok)}건 / 최종 실패: {len(still_fail)}건")
+        log_fn(f"추가 성공: {len(new_ok):,}건 / 최종 미확인: {len(still_fail):,}건")
 
     confirmed_missing = (
         {k for k in err_400} |
@@ -409,10 +410,10 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
         retry_fail_path.write_text(
             json.dumps(retry_later, ensure_ascii=False), encoding='utf-8'
         )
-        log_fn(f"   [저장] 다음 실행 재시도 목록: {len(retry_later)}건")
+        log_fn(f"다음 실행 시 재시도: {len(retry_later):,}건 저장")
 
     # ── 상태 판정 ─────────────────────────────────────────────
-    log_fn("상태 판정 중...")
+    log_fn("가격 변동 확인 중...")
 
     def get_status(row):
         key, orig = row['_price_key'], row['원본_normal_price']
@@ -448,9 +449,9 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
     }
     loop.close()
     if max_retries_hit:
-        log_fn("서버 차단으로 일부 미확인 항목이 있습니다. 파일을 다운로드한 뒤 재실행하면 이어서 진행됩니다.")
+        log_fn("서버 차단으로 일부 항목이 미확인 처리되었습니다. 다운로드 후 재실행하면 이어서 조회합니다.")
     else:
-        log_fn("처리 완료!")
+        log_fn("가격 비교 완료!")
     return df, stats
 
 
@@ -619,7 +620,7 @@ if run_btn and uploaded:
         log_lines.append(f"[{ts}] {msg}")
         log_placeholder.code('\n'.join(log_lines[-30:]), language=None)
 
-    bar  = st.progress(0.0, text="준비 중...")
+    bar  = st.progress(0.0, text="파일 읽는 중...")
     prog = _ProgressWidget(bar)
 
     try:
@@ -628,10 +629,10 @@ if run_btn and uploaded:
         st.error(f"오류가 발생했습니다: {e}")
         st.stop()
 
-    bar.progress(1.0, text="완료!")
-    log_fn("엑셀 파일 생성 중...")
+    bar.progress(1.0, text="조회 완료")
+    log_fn("결과 파일 생성 중...")
     fname, result_bytes = save_excel(df)
-    log_fn(f"파일 생성 완료: {fname}")
+    log_fn(f"다운로드 준비 완료: {fname}")
 
     st.session_state.result_bytes = result_bytes
     st.session_state.fname        = fname
