@@ -330,6 +330,7 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
     price_map      = {}
     error_map      = {}
 
+    max_retries_hit = False
     while aborted:
         label = f"자동 재시도 {auto_retry_cnt}회차" if auto_retry_cnt > 0 else "1차"
         log_fn(f"API 호출 [{label}] 시작 (동시 {CONFIG['CONCURRENCY']}건)...")
@@ -348,15 +349,16 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
         if aborted:
             auto_retry_cnt += 1
             if auto_retry_cnt > CONFIG['AUTO_RETRY_MAX']:
-                log_fn(f"[중단] 자동 재시도 {CONFIG['AUTO_RETRY_MAX']}회 소진 — 재실행이 필요합니다.")
+                log_fn(f"[중단] 자동 재시도 {CONFIG['AUTO_RETRY_MAX']}회 소진.")
                 retry_abort = {k: v for k, v in error_map.items() if not _is_definite(str(v))}
                 if retry_abort:
                     retry_fail_path.write_text(
                         json.dumps(retry_abort, ensure_ascii=False), encoding='utf-8'
                     )
                     log_fn(f"   [저장] 실패 목록 {len(retry_abort)}건")
-                loop.close()
-                return None, None
+                log_fn(f"현재까지 수집된 {len(price_map):,}건으로 부분 결과를 생성합니다.")
+                max_retries_hit = True
+                break  # 부분 결과로 계속 진행
 
             wait_secs = CONFIG['AUTO_RETRY_WAIT']
             log_fn(f"서버 차단 감지 — {wait_secs // 60}분 후 자동 재시작 "
@@ -373,9 +375,9 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
             prog_widget.value = len(existing)
             log_fn(f"   재시작 — 완료 {len(existing):,}건 / 잔여 {total - len(existing):,}건")
 
-    # ── 완료 후 단기 재시도 (400 제외) ───────────────────────
+    # ── 완료 후 단기 재시도 (400 제외, 서버 차단 소진 시 생략) ──
     err_400   = {k: v for k, v in error_map.items() if 'HTTP 400' in str(v)}
-    err_other = {k: v for k, v in error_map.items() if 'HTTP 400' not in str(v)}
+    err_other = {} if max_retries_hit else {k: v for k, v in error_map.items() if 'HTTP 400' not in str(v)}
 
     if err_400:
         log_fn(f"   상품없음 확정(400): {len(err_400)}건 — 재시도 생략")
@@ -442,9 +444,13 @@ def run_pipeline(excel_bytes, sheet_name, log_fn, prog_widget, ckpt_dir):
         '미확인(재시도)':  int(df['상태'].str.contains('미확인').sum()),
         '출발일 지남':    int(df['상태'].str.contains('출발일지남').sum()),
         '정상':           int(df['상태'].str.fullmatch('정상').sum()),
+        '부분완료':        max_retries_hit,
     }
     loop.close()
-    log_fn("처리 완료!")
+    if max_retries_hit:
+        log_fn("서버 차단으로 일부 미확인 항목이 있습니다. 파일을 다운로드한 뒤 재실행하면 이어서 진행됩니다.")
+    else:
+        log_fn("처리 완료!")
     return df, stats
 
 
@@ -553,7 +559,10 @@ st.divider()
 # ── 결과가 이미 있으면 바로 표시 ─────────────────────────────
 if st.session_state.result_bytes is not None:
     stats = st.session_state.stats
-    st.success("가격 비교 완료!")
+    if stats.get('부분완료'):
+        st.warning("서버 차단으로 일부 항목이 [미확인] 처리되었습니다. 파일 다운로드 후 재실행하면 이어서 진행됩니다.")
+    else:
+        st.success("가격 비교 완료!")
     st.divider()
 
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -619,18 +628,12 @@ if run_btn and uploaded:
         st.error(f"오류가 발생했습니다: {e}")
         st.stop()
 
-    if df is None:
-        st.warning(
-            "자동 재시도 횟수를 모두 소진했습니다. "
-            "페이지를 새로고침 후 다시 실행하면 이어서 진행됩니다."
-        )
-    else:
-        bar.progress(1.0, text="완료!")
-        log_fn("엑셀 파일 생성 중...")
-        fname, result_bytes = save_excel(df)
-        log_fn(f"파일 생성 완료: {fname}")
+    bar.progress(1.0, text="완료!")
+    log_fn("엑셀 파일 생성 중...")
+    fname, result_bytes = save_excel(df)
+    log_fn(f"파일 생성 완료: {fname}")
 
-        st.session_state.result_bytes = result_bytes
-        st.session_state.fname        = fname
-        st.session_state.stats        = stats
-        st.rerun()
+    st.session_state.result_bytes = result_bytes
+    st.session_state.fname        = fname
+    st.session_state.stats        = stats
+    st.rerun()
