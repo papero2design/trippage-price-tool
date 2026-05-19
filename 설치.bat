@@ -4,8 +4,8 @@ cd /d "%~dp0"
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo Python not found.
-    echo Please install Python 3.12 from https://www.python.org/downloads/
-    echo Make sure to check "Add python.exe to PATH" during installation.
+    echo Install Python 3.12 from https://www.python.org/downloads/
+    echo Check "Add python.exe to PATH" during installation.
     pause
     exit /b 1
 )
@@ -29,5 +29,5 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo Done. Run 실행.bat to start.
+echo Setup complete. Run silhaeng.bat to start.
 pause
