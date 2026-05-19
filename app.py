@@ -175,7 +175,7 @@ async def _run_all_async(pkg_cds, search_pairs, log_fn, prog_widget, total_count
         try:
             tmp = Path(str(ckpt_path) + '.tmp')
             tmp.write_text(json.dumps(results, ensure_ascii=False), encoding='utf-8')
-            tmp.rename(ckpt_path)
+            tmp.replace(ckpt_path)
         except Exception as e:
             log_fn(f"   [오류] 체크포인트 저장 실패: {e}")
 
